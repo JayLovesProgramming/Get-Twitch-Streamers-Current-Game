@@ -106,7 +106,9 @@ async function monitorStreamers(streamerNames, interval = 20000) {
 const streamerNames = process.argv.slice(2);
 if (streamerNames.length === 0) {
     console.error("Please provide at least one streamer's name like so:");
-    console.error("pnpm server.js [streamer1] [streamer2] ...");
+    console.error("bun server.js [streamer1] [streamer2] ...");
+    console.error("Or ");
+    console.error("node server.js [streamer1] [streamer2] ...");
     process.exit(1);
 }
 
