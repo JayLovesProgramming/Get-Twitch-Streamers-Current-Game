@@ -1,71 +1,117 @@
 const puppeteer = require("puppeteer");
+const notifier = require("node-notifier");
 
+const debug = false;
 const pageElementToLookFor = `[data-a-target="stream-game-link"]`;
 const browserArgs = [
-    "--disable-gpu", // Disables GPU acceleration
-    "--disable-setuid-sandbox", // Disables the setuid sandbox. Applies to Linux Chromium sandbox
-    "--fast-start" // Runs the chromium process in fast mode to hopefully reduce loading times
-]
+    "--disable-gpu",
+    "--disable-setuid-sandbox",
+    "--fast-start"
+];
+
+const shouldMonitor = true;
+let lastGameNames = {}; // Stores previous/current game names for each streamer
+
+function debugCode(page) {
+    if (debug) {
+        page.on("load", () => {
+            console.log("Page loaded successfully");
+        });
+        page.on("response", response => {
+            console.log(`Response received: ${response.url()}`);
+        });
+    }
+}
+
+function sendDesktopNotification(streamerName, gameName, streamerURL) {
+    notifier.notify({
+        title: "Twitch Notifier",
+        message: `${streamerName} is now streaming ${gameName}`,
+        icon: "images/twitch.png",
+        sound: true,
+        wait: false,
+        appID: "Twitch Notifier"
+    }, (error, response, metadata) => {
+        if (metadata.activationType === "clicked") {
+            console.log("Clicked");
+        }
+    });
+}
+
+function checkIfGameChanged(streamerName, gameName, streamerURL, timeTaken) {
+    if (debug) {
+        console.log("Checking if game has changed");
+    } else if (gameName && gameName !== lastGameNames[streamerName]) {
+        console.log(`${streamerName} is currently streaming: ${gameName} (${timeTaken} seconds)`);
+        sendDesktopNotification(streamerName, gameName, streamerURL);
+        lastGameNames[streamerName] = gameName;
+    } else if (gameName && gameName === lastGameNames[streamerName]) {
+        console.log(`${streamerName} is still playing ${gameName} (${timeTaken} seconds)`);
+    } else if (!gameName) {
+        console.log(`${streamerName} is not streaming right now`);
+    }
+}
 
 async function getStreamerGame(streamerName) {
     let startTime = Date.now();
 
     const streamerURL = `https://www.twitch.tv/${streamerName}`;
 
-    // Launch a headless browser
     const browser = await puppeteer.launch({ headless: true, args: browserArgs });
     const page = await browser.newPage();
-    await page.setCacheEnabled(false);
 
-    try 
-    {
-        await page.setRequestInterception(true); // This is required to intercept the request in order to attempt a quicker response
-        page.on("request", (req) => { // Intercept the request before attempting to load the page
-            if (["image", "media", "font"].includes(req.resourceType())) {
-                req.abort(); // Block images/videos and font from the request to decrease loading times
-            }
-            else
-            {
+    try {
+        await page.setCacheEnabled(false);
+        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3");
+        await page.deleteCookie(...await page.cookies());
+        debugCode(page);
+
+        await page.setRequestInterception(true);
+        page.on("request", (req) => {
+            if (["image", "media", "font", "xhr", "websocket", "ping", "csp_report", "manifest", "prefetch", "beacon", "imageSet"].includes(req.resourceType()) || req.url().includes("svg")) {
+                req.abort();
+            } else {
                 req.continue();
             }
-        })
+        });
 
-        await page.goto(streamerURL, { waitForSelector: pageElementToLookFor, timeout: 7500 }); // Go to the streamers page and wait for the specified element (It shouldn't take longer than 7.5 seconds to load)
-        const gameName = await page.$eval(pageElementToLookFor, element => element.textContent); // Fetch the game name when it's available to us
+        await page.goto(streamerURL, { waitForSelector: pageElementToLookFor, timeout: 15000 });
+        const gameName = await page.$eval(pageElementToLookFor, element => element.textContent);
         
-
         const endTime = Date.now();
-        const timeTaken = (endTime - startTime) / 1000; // Convert to ms
+        const timeTaken = (endTime - startTime) / 1000;
+        
+        checkIfGameChanged(streamerName, gameName, streamerURL, timeTaken);
 
-        if (gameName)
-        {
-            console.log(`${streamerName} is currently streaming: ${gameName} (${timeTaken} seconds)`);
+        if (!gameName) {
+            console.log(`${streamerName}: No game name found`);
         }
-        else
-        {
-            console.log(`${streamerName} is not streaming right now or no game name found`);
+    } catch (error) {
+        if (!shouldMonitor) {
+            console.log(`${streamerName} is not streaming right now`);
         }
-    }
-    catch (error)
-    {
-        // console.error(`Error getting game name for streamer ${streamerName}`, error);
-        console.log(`${streamerName} is not streaming right now or no game name found`);
-    }
-    finally
-    {
-        await browser.close(); // Close the browser
+    } finally {
+        await browser.close();
     }
 }
 
-// Get the streamer name from the comamnd-line args
-const streamerName = process.argv[2];
-if (!streamerName)
-{
-    console.error("Please provide a streamers name like so:");
-    console.error("pnpm server.js [streamers name]");
-    console.error("npm server.js [streamers name]");
-    console.error("bun server.js [streamers name]");
-    process.exit(1);
-};
+async function monitorStreamers(streamerNames, interval = 20000) {
+    while (shouldMonitor) {
+        await Promise.all(streamerNames.map(streamerName => getStreamerGame(streamerName)));
+        await new Promise(resolve => setTimeout(resolve, interval));
+    }
+}
 
-getStreamerGame(streamerName);
+// Get the streamer names from command-line args
+const streamerNames = process.argv.slice(2);
+if (streamerNames.length === 0) {
+    console.error("Please provide at least one streamer's name like so:");
+    console.error("pnpm server.js [streamer1] [streamer2] ...");
+    process.exit(1);
+}
+
+if (shouldMonitor) {
+    monitorStreamers(streamerNames);
+} else {
+    streamerNames.forEach(streamerName => getStreamerGame(streamerName));
+}
