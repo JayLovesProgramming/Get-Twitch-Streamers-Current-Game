@@ -28,7 +28,7 @@ function sendDesktopNotification(streamerName, gameName, streamerURL) {
         title: "Twitch Notifier",
         message: `${streamerName} is now streaming ${gameName}`,
         icon: "images/twitch.png",
-        sound: true,
+        sound: false,
         wait: false,
         appID: "Twitch Notifier"
     }, (error, response, metadata) => {
@@ -40,13 +40,15 @@ function sendDesktopNotification(streamerName, gameName, streamerURL) {
 
 function checkIfGameChanged(streamerName, gameName, streamerURL, timeTaken) {
     if (debug) {
-        console.log("Checking if game has changed");
+        // console.log("Checking if game has changed");
+    } else if (gameName && lastGameNames[streamerName] && gameName !== lastGameNames[streamerName]) {
+        console.log(`${streamerName} has changed game to: ${gameName} from ${lastGameNames[streamerName]} (${timeTaken} seconds)`);
     } else if (gameName && gameName !== lastGameNames[streamerName]) {
         console.log(`${streamerName} is currently streaming: ${gameName} (${timeTaken} seconds)`);
         sendDesktopNotification(streamerName, gameName, streamerURL);
         lastGameNames[streamerName] = gameName;
     } else if (gameName && gameName === lastGameNames[streamerName]) {
-        console.log(`${streamerName} is still playing ${gameName} (${timeTaken} seconds)`);
+        // console.log(`${streamerName} is still playing ${gameName} (${timeTaken} seconds)`);
     } else if (!gameName) {
         console.log(`${streamerName} is not streaming right now`);
     }
